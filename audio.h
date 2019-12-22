@@ -1,0 +1,350 @@
+#include <IRremote.h>
+
+int RECV_PIN = 2; // 红外一体化接收头连接到Arduino 2号引脚
+int AUDIOpin = A0;
+int pushButtonpin = 6;
+
+
+
+//定义LED输出引脚
+
+IRrecv irrecv(RECV_PIN);
+
+decode_results results; // 用于存储编码结果的对象
+
+//触摸开关
+#include <Microduino_ColorLED.h> //引用彩灯库
+#define PIN A2   //led灯控制引脚
+#define NUMPIXELS   2        //级联彩灯数量
+#define pushButton  6  //开关接入
+ColorLED strip = ColorLED(NUMPIXELS, PIN); //将ColorLED类命名为strip，并定义彩灯数量和彩灯引脚号
+
+int buttonState, num;
+unsigned long button_time_cache = 0;
+
+
+//音乐盒
+#include <Rtc_Pcf8563.h>
+Rtc_Pcf8563 rtc;
+#define music_num_MAX 9 //最多存放9首歌曲
+#include <SoftwareSerial.h>
+//用户自定义部分-----------------
+#include <Wire.h>
+//EEPROM---------------------
+#include <EEPROM.h>
+#define EEPROM_write(address, p) {int i = 0; byte *pp = (byte*)&(p);for(; i < sizeof(p); i++) EEPROM.write(address+i, pp[i]);}
+#define EEPROM_read(address, p)  {int i = 0; byte *pp = (byte*)&(p);for(; i < sizeof(p); i++) pp[i]=EEPROM.read(address+i);}
+
+struct config_type
+{
+  int EEPROM_music_num;       //歌曲的数目
+  int EEPROM_music_vol;       //歌曲的音量
+};
+
+//用户自定义部分------------------------
+#include "audio.h"   //"audio.h"是控制音频文件
+#include "U8glib.h"
+//-------字体设置，大、中、小
+#define setFont_L u8g.setFont(u8g_font_7x13)
+#define setFont_M u8g.setFont(u8g_font_fixed_v0r)
+#define setFont_S u8g.setFont(u8g_font_fixed_v0r)
+/*
+font:
+ u8g_font_7x13
+ u8g_font_fixed_v0r
+ u8g_font_chikitar
+ u8g_font_osb21
+ u8g_font_courB14r
+ u8g_font_courB24n
+ u8g_font_9x18Br
+ */
+
+//屏幕类型--------
+U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE);
+
+#define init_draw 500  //主界面刷新时间
+unsigned long timer_draw;
+
+int MENU_FONT = 1;  //初始化字体大小 0：小，1：中，2：大
+
+boolean music_status = false; //歌曲播放状态
+int music_num = 1;    //歌曲序号
+int music_vol = 30;             //音量0~30
+
+String dateStr, ret;
+
+boolean key, key_cache;         //定义mp3的开关
+
+unsigned long music_vol_time_cache = 0;
+unsigned long music_vol_time = 0;
+boolean music_vol_sta = false;
+
+int uiStep()         //切歌
+{
+  if (analogRead(A0) < 100)  //Y-up
+  {
+    delay(50);       //延迟50毫秒输出
+    if (analogRead(A0) < 100)      //
+      return 1;      //回到动作1
+  }
+  if (analogRead(A1) < 100)    //
+  {
+    delay(50);       //延迟50毫秒输出
+    if (analogRead(A1) < 100)  //X-Right
+      return 2;      //回到动作2
+  }
+  if (analogRead(A1) > 900)    //X-Left
+  {
+    delay(50);       //延迟50毫秒输出
+    if (analogRead(A1) > 900)  //
+      return 3;      //回到动作3
+  }
+  return 0;
+}
+
+void setup()        //创建无返回值函数
+{
+  Serial.begin(9600); //初始化串口
+pinMode(AUDIOpin,OUTPUT);
+pinMode(pushButtonpin,OUTPUT);
+
+
+irrecv.enableIRIn(); // 初始化红外解码
+
+  //触摸开关
+  strip.begin();
+  strip.setBrightness(60);       //设置彩灯亮度
+  strip.show();
+  // initialize serial communication at 9600 bits per second:
+  Serial.begin(9600);
+  // make the pushbutton's pin an input:
+  pinMode(pushButton, INPUT);
+
+
+
+  //音乐盒
+  Serial.begin(9600);    //初始化串口通信，并将波特率设置为9600
+  //pinMode(A0, INPUT);
+  //pinMode(A1, INPUT);
+  //EEPROM---------------------
+  eeprom_READ();
+
+  //初始化mp3模块
+  audio_init(DEVICE_TF, MODE_loopOne, music_vol);   //初始化mp3模块
+
+  // u8g.setRot180();  // rotate screen, if required
+}
+
+void loop()            //无返回值Loop函数
+{
+  if (irrecv.decode(&results))
+{
+Serial.println( results.value);
+if( results.value == 0x1FE807F ) //若接收到按键A按下的指令，打开AUDIO
+{
+digitalWrite(AUDIOpin,HIGH);
+digitalWrite(pushButtonpin,HIGH);
+U8GLIB_SSD1306_128X64 ON;
+
+
+
+
+}
+else if(results.value == 0x1FE40BF) //接收到B按键按下的命令，关闭AUDIO
+{
+digitalWrite(AUDIOpin,LOW);
+digitalWrite(pushButtonpin,LOW);
+U8GLIB_SSD1306_128X64 OFF;
+
+
+}
+irrecv.resume(); // 接收下一个编码
+} 
+
+   //触摸开关
+   buttonState = digitalRead(pushButton);
+
+if(buttonState==0){
+if(millis()-button_time_cache>500)
+{
+button_time_cache=millis();
+strip.setPixelColor(0, strip.Color(255, 0, 0));
+strip.show();
+Serial.println("someone is coming");
+}
+  
+   }
+    
+
+//delay(500);
+if(buttonState==1)
+{
+if(millis()-button_time_cache>5000)
+{
+strip.setPixelColor(0, strip.Color(0, 0, 0));//灭
+strip.show();
+
+}
+}
+
+
+ //音乐盒 
+  int vol = uiStep(); //检测输入动作
+  
+    Serial.print("0:");
+    Serial.print(analogRead(A0));
+    Serial.print("  1:");
+    Serial.println(analogRead(A1));
+
+  if (vol == 1) key = true;     //按一次开关,为动作1
+  else key = false;             //否则不做为动作1
+
+  if (!key && key_cache)    //按下松开后
+  {
+    key_cache = key;    //缓存作判断用
+    music_status = !music_status; //播放或暂停
+    if (music_status == true) //播放
+    {
+      Serial.println("play");   //串口输出 “play”（工作
+      //      audio_choose(1);
+      audio_play();              //音频工作
+    }
+    else  //暂停
+    {
+      Serial.println("pause");   //串口输出 “pause”（暂停）
+      audio_pause();              //音频暂停工作
+    }
+  }
+  else
+  {
+    key_cache = key;     //缓存作判断用
+  }
+
+  if (vol == 0)                   //如果不对开关操作为动作0
+  {
+    //    Serial.println("no");
+    music_vol_time_cache = millis();
+    music_vol_time = music_vol_time_cache;
+    music_vol_sta = false;        //音频不工作
+  }
+  else if (vol == 2)              //向右拨动开关为动作2
+  {
+    music_vol_time = millis() - music_vol_time_cache;
+    //    if(music_vol_time>200)  //拨动开关时间大于0.2秒
+    delay(500);                   //延迟0.5秒
+    if (uiStep() == 0 && !music_vol_sta)
+    {
+      Serial.println("next");    //歌曲输出下一个（向右波动1次开关）
+
+      music_num++;  //歌曲序号加
+      if (music_num > music_num_MAX)  //限制歌曲序号范围，如果歌曲序号大于30
+      {
+        music_num = 1; //歌曲序号返回1
+      }
+      audio_choose(music_num);
+      audio_play();
+      //delay(500);      //延迟0。5秒
+      music_status = true;       //音频状态为工作
+      eeprom_WRITE();
+
+    }
+    else if (music_vol_time > 1500) //拨动开关时间大于1.5秒
+    {
+      music_vol_sta = true;        //音量工作
+      music_vol++;                 //音量+1
+      if (music_vol > 30) music_vol = 30; //若音量大于30，则音量为30
+      audio_vol(music_vol);
+      Serial.println("++");       //Serial.println函数输出“+1”
+      delay(100);                  //延迟0.1秒
+      eeprom_WRITE();
+    }
+  }
+  else if (vol == 3)      //向左拨动开关为动作3
+  {
+    music_vol_time = millis() - music_vol_time_cache;
+    //    if(music_vol_time>200)       //延迟0.2秒
+    delay(500);//延迟0.5秒
+    if (uiStep() == 0 && !music_vol_sta)
+    {
+      Serial.println("perv");
+
+      music_num--;  //歌曲序号减1
+      if (music_num < 1)  //限制歌曲序号范围，如果歌曲序号小于1
+      {
+        music_num = music_num_MAX;   //歌曲序号为最大（30）
+      }
+      audio_choose(music_num);       //音频选择歌曲序号
+      audio_play();                  //音频工作
+      //        delay(500);          //延迟0.5秒
+      music_status = true;           //音频工作
+      eeprom_WRITE();
+    }
+    else if (music_vol_time > 1500)  //拨动开关时间大于1.5秒
+    {
+      music_vol_sta = true;          //音频工作
+      music_vol--;                   //音量减1
+      if (music_vol < 1) music_vol = 1; //如果音量小于1，音量为1
+      audio_vol(music_vol);
+      Serial.println("--");         //Serial.println函数输出“-1”
+      delay(100);                    //延迟0.1秒
+      eeprom_WRITE();
+    }
+  }
+
+  if (millis() - timer_draw > init_draw)
+  {
+    u8g.firstPage();
+    do {
+      draw();
+    }
+    while ( u8g.nextPage() );
+    timer_draw = millis();
+  }
+}
+
+void eeprom_WRITE()
+{
+  config_type config;     // 定义结构变量config，并定义config的内容
+  config.EEPROM_music_num = music_num;
+  config.EEPROM_music_vol = music_vol;
+
+  EEPROM_write(0, config);  // 变量config存储到EEPROM，地址0写入
+}
+
+void eeprom_READ()
+{
+  config_type config_readback;
+  EEPROM_read(0, config_readback);
+  music_num = config_readback.EEPROM_music_num;
+  music_vol = config_readback.EEPROM_music_vol;
+}
+
+//主界面，可自由定义
+void draw()
+{
+   if (irrecv.decode(&results))
+{
+Serial.println( results.value);
+if( results.value == 0x1FE807F ) 
+  {setFont_L;
+
+  u8g.setPrintPos(4, 16);
+  u8g.print("Music_sta:");
+  u8g.print(music_status ? "play" : "pause");
+
+  u8g.setPrintPos(4, 16 * 2);
+  u8g.print("Music_vol:");
+  u8g.print(music_vol);
+  u8g.print("/30");
+  u8g.setPrintPos(4, 16 * 3);
+  u8g.print("Music_num:");
+  u8g.print(music_num);
+  u8g.print("/");
+  u8g.print(music_num_MAX);
+  u8g.setPrintPos(4, 16 * 4);
+  u8g.print("....Microduino....");
+  //u8g.print(rtc.formatTime(RTCC_TIME_HMS));
+
+}
+}
+}
